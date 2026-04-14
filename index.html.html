@@ -1,0 +1,1216 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ISO 8583 Bitmap Analyzer</title>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;600;700&family=Syne:wght@400;600;700;800&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg:        #080C10;
+    --surface:   #0E1419;
+    --card:      #131920;
+    --border:    #1E2830;
+    --border2:   #243040;
+    --accent:    #00E5B0;
+    --accent2:   #3B82F6;
+    --accent3:   #F97316;
+    --text:      #D4E4F0;
+    --muted:     #5A7085;
+    --faint:     #2A3A48;
+    --success:   #22C55E;
+    --error:     #EF4444;
+    --warning:   #EAB308;
+    --tag-bg:    rgba(0,229,176,0.08);
+    --tag-fg:    #00E5B0;
+    --tag2-bg:   rgba(59,130,246,0.1);
+    --tag2-fg:   #60A5FA;
+  }
+
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 13px;
+    min-height: 100vh;
+    overflow-x: hidden;
+  }
+
+  /* ── Scanline overlay ── */
+  body::before {
+    content: '';
+    position: fixed;
+    inset: 0;
+    background: repeating-linear-gradient(
+      0deg,
+      transparent,
+      transparent 2px,
+      rgba(0,0,0,0.04) 2px,
+      rgba(0,0,0,0.04) 4px
+    );
+    pointer-events: none;
+    z-index: 9999;
+  }
+
+  /* ── Header ── */
+  header {
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+    padding: 0 24px;
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    height: 56px;
+    position: sticky;
+    top: 0;
+    z-index: 100;
+    backdrop-filter: blur(12px);
+  }
+
+  .logo {
+    font-family: 'Syne', sans-serif;
+    font-size: 18px;
+    font-weight: 800;
+    color: var(--accent);
+    letter-spacing: -0.5px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .logo-dot { width: 8px; height: 8px; background: var(--accent); border-radius: 50%; animation: pulse 2s infinite; }
+  @keyframes pulse { 0%,100%{opacity:1;transform:scale(1)} 50%{opacity:0.4;transform:scale(0.7)} }
+
+  .logo-sub {
+    color: var(--muted);
+    font-size: 11px;
+    font-weight: 400;
+    border-left: 1px solid var(--border2);
+    padding-left: 16px;
+    margin-left: 8px;
+  }
+
+  .badge {
+    margin-left: auto;
+    background: var(--tag-bg);
+    color: var(--accent);
+    border: 1px solid rgba(0,229,176,0.2);
+    padding: 3px 10px;
+    border-radius: 4px;
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: 0.5px;
+  }
+
+  /* ── Tab bar ── */
+  nav {
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    padding: 0 24px;
+    gap: 2px;
+  }
+
+  .tab {
+    padding: 10px 18px;
+    cursor: pointer;
+    color: var(--muted);
+    font-size: 12px;
+    font-weight: 500;
+    border-bottom: 2px solid transparent;
+    transition: all 0.15s;
+    user-select: none;
+    white-space: nowrap;
+  }
+
+  .tab:hover { color: var(--text); }
+  .tab.active { color: var(--accent); border-bottom-color: var(--accent); }
+
+  /* ── Main content ── */
+  main { padding: 20px 24px; max-width: 1200px; margin: 0 auto; }
+
+  .tab-panel { display: none; }
+  .tab-panel.active { display: block; }
+
+  /* ── Cards ── */
+  .card {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    margin-bottom: 16px;
+    overflow: hidden;
+  }
+
+  .card-title {
+    background: rgba(255,255,255,0.02);
+    border-bottom: 1px solid var(--border);
+    padding: 8px 16px;
+    font-size: 10px;
+    font-weight: 600;
+    color: var(--muted);
+    letter-spacing: 0.8px;
+    text-transform: uppercase;
+  }
+
+  .card-body { padding: 16px; }
+
+  /* ── Input row ── */
+  .input-row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    flex-wrap: wrap;
+    margin-bottom: 12px;
+  }
+
+  .input-label {
+    color: var(--muted);
+    font-size: 11px;
+    font-weight: 600;
+    white-space: nowrap;
+    min-width: 80px;
+  }
+
+  input[type="text"] {
+    flex: 1;
+    min-width: 260px;
+    background: var(--bg);
+    border: 1px solid var(--border2);
+    border-radius: 6px;
+    color: var(--accent);
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 13px;
+    padding: 8px 12px;
+    outline: none;
+    transition: border-color 0.15s, box-shadow 0.15s;
+    caret-color: var(--accent);
+  }
+
+  input[type="text"]:focus {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 2px rgba(0,229,176,0.12);
+  }
+
+  input.blue { color: var(--accent2); caret-color: var(--accent2); }
+  input.blue:focus { border-color: var(--accent2); box-shadow: 0 0 0 2px rgba(59,130,246,0.12); }
+
+  .char-count {
+    font-size: 10px;
+    color: var(--faint);
+    min-width: 50px;
+    text-align: right;
+  }
+
+  /* ── Buttons ── */
+  .btn-row { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 12px; }
+
+  button {
+    background: rgba(255,255,255,0.04);
+    border: 1px solid var(--border2);
+    border-radius: 6px;
+    color: var(--muted);
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    font-weight: 600;
+    padding: 7px 14px;
+    cursor: pointer;
+    transition: all 0.15s;
+    white-space: nowrap;
+  }
+
+  button:hover { background: rgba(255,255,255,0.07); border-color: var(--border2); color: var(--text); }
+
+  button.primary { color: var(--accent); border-color: rgba(0,229,176,0.3); }
+  button.primary:hover { background: rgba(0,229,176,0.08); border-color: var(--accent); }
+
+  button.secondary { color: var(--accent2); border-color: rgba(59,130,246,0.3); }
+  button.secondary:hover { background: rgba(59,130,246,0.08); border-color: var(--accent2); }
+
+  button.danger { color: var(--error); border-color: rgba(239,68,68,0.3); }
+  button.danger:hover { background: rgba(239,68,68,0.08); border-color: var(--error); }
+
+  /* ── Example chips ── */
+  .examples { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 4px; }
+
+  .chip {
+    background: var(--tag2-bg);
+    color: var(--tag2-fg);
+    border: 1px solid rgba(59,130,246,0.2);
+    border-radius: 4px;
+    padding: 3px 10px;
+    font-size: 10px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.15s;
+  }
+
+  .chip:hover { background: rgba(59,130,246,0.15); border-color: var(--accent2); color: #93C5FD; }
+
+  /* ── Stats row ── */
+  .stats { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 14px; }
+
+  .stat-box {
+    background: rgba(255,255,255,0.03);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 10px 14px;
+    min-width: 100px;
+  }
+
+  .stat-val {
+    font-size: 15px;
+    font-weight: 700;
+    color: var(--accent);
+    font-family: 'JetBrains Mono', monospace;
+    word-break: break-all;
+    margin-bottom: 3px;
+  }
+
+  .stat-label { font-size: 9px; color: var(--muted); font-weight: 600; letter-spacing: 0.5px; text-transform: uppercase; }
+
+  /* ── DE Tag strip ── */
+  .de-strip-wrap {
+    overflow-x: auto;
+    padding: 4px 0 8px;
+    margin-bottom: 4px;
+    scrollbar-width: thin;
+    scrollbar-color: var(--border2) transparent;
+  }
+
+  .de-strip {
+    display: flex;
+    gap: 4px;
+    width: max-content;
+    min-width: 100%;
+  }
+
+  .de-tag {
+    background: var(--tag-bg);
+    color: var(--tag-fg);
+    border: 1px solid rgba(0,229,176,0.15);
+    border-radius: 4px;
+    padding: 3px 7px;
+    font-size: 10px;
+    font-weight: 700;
+    white-space: nowrap;
+    cursor: default;
+    transition: all 0.15s;
+    position: relative;
+  }
+
+  .de-tag:hover {
+    background: rgba(0,229,176,0.15);
+    border-color: var(--accent);
+    color: #fff;
+    z-index: 10;
+  }
+
+  .de-tag .tooltip {
+    display: none;
+    position: absolute;
+    bottom: calc(100% + 6px);
+    left: 50%;
+    transform: translateX(-50%);
+    background: #1a2535;
+    border: 1px solid var(--border2);
+    border-radius: 4px;
+    padding: 5px 9px;
+    font-size: 10px;
+    color: var(--text);
+    white-space: nowrap;
+    pointer-events: none;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.5);
+    z-index: 100;
+  }
+
+  .de-tag:hover .tooltip { display: block; }
+
+  /* ── Output text box ── */
+  .output-box {
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 14px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 12px;
+    color: var(--text);
+    white-space: pre;
+    overflow: auto;
+    min-height: 140px;
+    max-height: 320px;
+    line-height: 1.7;
+    scrollbar-width: thin;
+    scrollbar-color: var(--border2) transparent;
+  }
+
+  .output-box.error { color: var(--error); }
+
+  /* ── Quick DE Selector ── */
+  .de-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+    gap: 6px;
+    max-height: 180px;
+    overflow-y: auto;
+    padding: 2px;
+    scrollbar-width: thin;
+    scrollbar-color: var(--border2) transparent;
+  }
+
+  .de-check {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    padding: 5px 8px;
+    border-radius: 4px;
+    cursor: pointer;
+    transition: background 0.1s;
+    user-select: none;
+  }
+
+  .de-check:hover { background: rgba(255,255,255,0.04); }
+  .de-check input { accent-color: var(--accent2); width: 13px; height: 13px; cursor: pointer; flex-shrink: 0; }
+  .de-check span { font-size: 11px; color: var(--text); }
+  .de-check .de-num { color: var(--accent2); font-weight: 700; min-width: 36px; }
+
+  /* ── Bit Grid ── */
+  .grid-container {
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 16px;
+    overflow-x: auto;
+  }
+
+  .grid-level { margin-bottom: 24px; }
+
+  .grid-level-title {
+    font-size: 10px;
+    font-weight: 700;
+    color: var(--accent);
+    letter-spacing: 1px;
+    margin-bottom: 10px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .grid-level-title::after {
+    content: '';
+    flex: 1;
+    height: 1px;
+    background: var(--border);
+  }
+
+  .bit-grid {
+    display: grid;
+    grid-template-columns: repeat(16, 36px);
+    gap: 3px;
+  }
+
+  .bit-cell {
+    width: 36px;
+    height: 36px;
+    border-radius: 4px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    font-size: 9px;
+    font-weight: 700;
+    cursor: default;
+    transition: transform 0.1s;
+    border: 1px solid transparent;
+    position: relative;
+  }
+
+  .bit-cell:hover { transform: scale(1.08); z-index: 5; }
+
+  .bit-cell.on {
+    background: rgba(34,197,94,0.18);
+    border-color: var(--success);
+    color: var(--success);
+  }
+
+  .bit-cell.off {
+    background: rgba(255,255,255,0.02);
+    border-color: var(--border);
+    color: var(--faint);
+  }
+
+  .bit-cell .bit-de { font-size: 9px; font-weight: 700; line-height: 1; }
+  .bit-cell .bit-val { font-size: 8px; font-weight: 400; opacity: 0.7; }
+
+  .bit-cell .tooltip {
+    display: none;
+    position: absolute;
+    bottom: calc(100% + 4px);
+    left: 50%;
+    transform: translateX(-50%);
+    background: #1a2535;
+    border: 1px solid var(--border2);
+    border-radius: 4px;
+    padding: 4px 8px;
+    font-size: 9px;
+    color: var(--text);
+    white-space: nowrap;
+    pointer-events: none;
+    z-index: 100;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.5);
+  }
+
+  .bit-cell:hover .tooltip { display: block; }
+
+  /* ── History table ── */
+  .hist-table { width: 100%; border-collapse: collapse; font-size: 11px; }
+
+  .hist-table th {
+    background: rgba(255,255,255,0.03);
+    color: var(--accent);
+    font-weight: 700;
+    padding: 10px 12px;
+    text-align: left;
+    border-bottom: 1px solid var(--border2);
+    font-size: 10px;
+    letter-spacing: 0.5px;
+  }
+
+  .hist-table td {
+    padding: 9px 12px;
+    border-bottom: 1px solid var(--border);
+    color: var(--text);
+    font-family: 'JetBrains Mono', monospace;
+    max-width: 280px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .hist-table tr:hover td { background: rgba(255,255,255,0.02); }
+
+  .hist-op {
+    display: inline-block;
+    padding: 2px 7px;
+    border-radius: 3px;
+    font-size: 9px;
+    font-weight: 700;
+    letter-spacing: 0.3px;
+  }
+
+  .hist-op.bm { background: var(--tag-bg); color: var(--accent); }
+  .hist-op.de { background: var(--tag2-bg); color: var(--tag2-fg); }
+
+  /* ── About ── */
+  .about-card {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 40px;
+    max-width: 700px;
+    margin: 0 auto;
+  }
+
+  .about-title {
+    font-family: 'Syne', sans-serif;
+    font-size: 28px;
+    font-weight: 800;
+    color: var(--accent);
+    margin-bottom: 6px;
+  }
+
+  .about-ver { color: var(--muted); margin-bottom: 24px; font-size: 12px; }
+  .about-sep { border: none; border-top: 1px solid var(--border); margin: 24px 0; }
+
+  .about-feat {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+    margin: 16px 0;
+  }
+
+  .feat-item {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    font-size: 12px;
+    color: var(--text);
+    padding: 8px 12px;
+    background: rgba(255,255,255,0.02);
+    border-radius: 5px;
+    border: 1px solid var(--border);
+  }
+
+  .feat-icon { color: var(--accent); font-size: 14px; flex-shrink: 0; }
+
+  .about-foot { color: var(--muted); font-size: 11px; margin-top: 20px; }
+
+  /* ── Hint text ── */
+  .hint { color: var(--muted); font-size: 10px; margin-bottom: 10px; line-height: 1.6; }
+
+  /* ── Empty state ── */
+  .empty { color: var(--faint); font-size: 11px; padding: 20px 0; text-align: center; }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="logo">
+    <div class="logo-dot"></div>
+    ISO 8583
+    <span class="logo-sub">Bitmap & Data Element Analyzer</span>
+  </div>
+  <div class="badge">v2.0</div>
+</header>
+
+<nav id="navbar">
+  <div class="tab active" data-tab="bitmap">Bitmap → DE</div>
+  <div class="tab" data-tab="de">DE → Bitmap</div>
+  <div class="tab" data-tab="grid">Bit Grid</div>
+  <div class="tab" data-tab="history">History</div>
+  <div class="tab" data-tab="about">About</div>
+</nav>
+
+<main>
+
+  <!-- ═══════════ TAB 1: Bitmap → DE ═══════════ -->
+  <div class="tab-panel active" id="panel-bitmap">
+    <div class="card">
+      <div class="card-title">Hex Bitmap Input</div>
+      <div class="card-body">
+        <div class="input-row">
+          <span class="input-label">Bitmap:</span>
+          <input type="text" id="bm-input" placeholder="e.g. 7230054108C08000" autocomplete="off" spellcheck="false">
+          <span class="char-count" id="bm-chars">0 chars</span>
+        </div>
+        <div class="btn-row">
+          <button class="primary" onclick="doBitmap()">▶ Analyze</button>
+          <button class="secondary" onclick="pasteClipboard('bm-input', doBitmap)">⊕ Paste</button>
+          <button onclick="clearBitmap()">✕ Clear</button>
+        </div>
+        <div class="examples">
+          <span style="color:var(--muted);font-size:10px;">Examples:</span>
+          <span class="chip" onclick="loadExampleBm('7230054108C08000')">Primary only</span>
+          <span class="chip" onclick="loadExampleBm('F230054108C08000003C000000000000')">Primary+Secondary</span>
+          <span class="chip" onclick="loadExampleBm('F230054108C08000803C0000000000007000000000000000')">All bitmaps</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-title">Results</div>
+      <div class="card-body">
+        <div class="stats" id="bm-stats">
+          <div class="stat-box"><div class="stat-val" id="stat-levels">—</div><div class="stat-label">Bitmap Levels</div></div>
+          <div class="stat-box"><div class="stat-val" id="stat-count">—</div><div class="stat-label">DEs Present</div></div>
+          <div class="stat-box"><div class="stat-val" id="stat-primary" style="font-size:11px;">—</div><div class="stat-label">Primary</div></div>
+          <div class="stat-box"><div class="stat-val" id="stat-secondary" style="font-size:11px;">—</div><div class="stat-label">Secondary</div></div>
+          <div class="stat-box"><div class="stat-val" id="stat-third" style="font-size:11px;">—</div><div class="stat-label">Third</div></div>
+        </div>
+
+        <div style="color:var(--muted);font-size:10px;font-weight:600;margin-bottom:5px;">Data Elements:</div>
+        <div class="de-strip-wrap">
+          <div class="de-strip" id="bm-de-strip">
+            <span class="empty">— run analysis to see tags —</span>
+          </div>
+        </div>
+
+        <div class="output-box" id="bm-output">— run analysis to see results —</div>
+
+        <div class="btn-row" style="margin-top:10px;">
+          <button class="secondary" onclick="exportBmJson()">⬇ Export JSON</button>
+          <button onclick="exportBmTxt()">⬇ Export TXT</button>
+          <button class="primary" onclick="sendBmToGrid()">→ View in Bit Grid</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══════════ TAB 2: DE → Bitmap ═══════════ -->
+  <div class="tab-panel" id="panel-de">
+    <div class="card">
+      <div class="card-title">Data Elements Input</div>
+      <div class="card-body">
+        <div class="input-row">
+          <span class="input-label">DEs:</span>
+          <input type="text" class="blue" id="de-input" placeholder="e.g. 2, 3, 4, 7, 11, 12, 13, 39, 41, 49" autocomplete="off" spellcheck="false">
+        </div>
+        <div class="hint">Enter comma-separated DE numbers (1–192). Bitmap indicator bits (1, 65) are set automatically.</div>
+        <div class="btn-row">
+          <button class="secondary" onclick="doDe()">▶ Generate Bitmap</button>
+          <button onclick="clearDe()">✕ Clear</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-title">Quick DE Selector — click to toggle</div>
+      <div class="card-body" style="padding-bottom:12px;">
+        <div class="de-grid" id="de-grid"></div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-title">Generated Bitmap</div>
+      <div class="card-body">
+        <div class="output-box" id="de-output">— generate a bitmap to see results —</div>
+        <div class="btn-row" style="margin-top:10px;">
+          <button class="secondary" onclick="exportDeJson()">⬇ Export JSON</button>
+          <button class="primary" onclick="copyDeBitmap()">📋 Copy Bitmap</button>
+          <button onclick="sendDeToGrid()">→ View in Bit Grid</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══════════ TAB 3: Bit Grid ═══════════ -->
+  <div class="tab-panel" id="panel-grid">
+    <div class="card">
+      <div class="card-title">Bitmap Bit Grid Visualizer</div>
+      <div class="card-body">
+        <div class="hint">Each cell represents one bit. Green = bit ON (DE present), dark = bit OFF.</div>
+        <div class="input-row">
+          <span class="input-label">Bitmap:</span>
+          <input type="text" id="grid-input" placeholder="Enter hex bitmap..." autocomplete="off" spellcheck="false">
+        </div>
+        <div class="btn-row">
+          <button class="primary" onclick="doGrid()">▶ Visualize</button>
+          <button onclick="clearGrid()">✕ Clear</button>
+        </div>
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-title">Bit Grid</div>
+      <div class="card-body">
+        <div class="grid-container" id="grid-output">
+          <div class="empty">— enter a bitmap above and click Visualize —</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══════════ TAB 4: History ═══════════ -->
+  <div class="tab-panel" id="panel-history">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;">
+      <div style="font-family:'Syne',sans-serif;font-size:16px;font-weight:700;color:var(--text);">Session History</div>
+      <button class="danger" onclick="clearHistory()">✕ Clear History</button>
+    </div>
+    <div class="card">
+      <div class="card-body" style="padding:0;overflow-x:auto;">
+        <table class="hist-table">
+          <thead>
+            <tr>
+              <th style="width:70px;">Time</th>
+              <th style="width:130px;">Operation</th>
+              <th>Input</th>
+              <th>Output</th>
+            </tr>
+          </thead>
+          <tbody id="hist-body">
+            <tr><td colspan="4" class="empty">— no history yet —</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══════════ TAB 5: About ═══════════ -->
+  <div class="tab-panel" id="panel-about">
+    <div class="about-card">
+      <div class="about-title">ISO 8583 Bitmap Analyzer</div>
+      <div class="about-ver">v2.0 · Professional Edition · Browser-based</div>
+      <hr class="about-sep">
+      <p style="color:var(--text);font-size:12px;line-height:1.8;">
+        This tool helps payment engineers and QA testers decode and construct ISO 8583 bitmaps used in financial messaging systems.
+      </p>
+      <div class="about-feat">
+        <div class="feat-item"><span class="feat-icon">◆</span>Strict bitmap validation (Primary / Secondary / Third)</div>
+        <div class="feat-item"><span class="feat-icon">◆</span>DE descriptions for all 128 standard fields</div>
+        <div class="feat-item"><span class="feat-icon">◆</span>Quick DE selector with live bitmap generation</div>
+        <div class="feat-item"><span class="feat-icon">◆</span>Bit grid visualizer — every bit position rendered</div>
+        <div class="feat-item"><span class="feat-icon">◆</span>Session history with table view</div>
+        <div class="feat-item"><span class="feat-icon">◆</span>JSON & TXT export to file</div>
+        <div class="feat-item"><span class="feat-icon">◆</span>Clipboard paste & copy</div>
+        <div class="feat-item"><span class="feat-icon">◆</span>100% browser-based, no install needed</div>
+      </div>
+      <hr class="about-sep">
+      <div class="hint">
+        Supported bitmap sizes:<br>
+        <b style="color:var(--text);">16 hex chars</b> — Primary bitmap only<br>
+        <b style="color:var(--text);">32 hex chars</b> — Primary + Secondary<br>
+        <b style="color:var(--text);">48 hex chars</b> — Primary + Secondary + Third
+      </div>
+      <div class="about-foot">Built with vanilla HTML · CSS · JavaScript · ISO 8583 Standard</div>
+    </div>
+  </div>
+
+</main>
+
+<script>
+// ═══════════════════════════════════════════════════════
+//  DE DESCRIPTIONS
+// ═══════════════════════════════════════════════════════
+const DE_DESC = {
+  1:"Secondary Bitmap",2:"Primary Account Number (PAN)",3:"Processing Code",
+  4:"Transaction Amount",5:"Settlement Amount",6:"Cardholder Billing Amount",
+  7:"Transmission Date and Time",8:"Cardholder Billing Fee Amount",
+  9:"Settlement Conversion Rate",10:"Cardholder Billing Conversion Rate",
+  11:"System Trace Audit Number (STAN)",12:"Local Transaction Time",
+  13:"Local Transaction Date",14:"Expiration Date",15:"Settlement Date",
+  16:"Currency Conversion Date",17:"Capture Date",18:"Merchant Type (MCC)",
+  19:"Acquiring Institution Country Code",20:"PAN Extended Country Code",
+  21:"Forwarding Institution Country Code",22:"Point of Service Entry Mode",
+  23:"Card Sequence Number",24:"Network International Identifier (NII)",
+  25:"Point of Service Condition Code",26:"Point of Service PIN Capture Code",
+  27:"Auth ID Response Length",28:"Transaction Fee Amount",29:"Settlement Fee Amount",
+  30:"Transaction Processing Fee Amount",31:"Settlement Processing Fee Amount",
+  32:"Acquiring Institution ID Code",33:"Forwarding Institution ID Code",
+  34:"Primary Account Number Extended",35:"Track 2 Data",36:"Track 3 Data",
+  37:"Retrieval Reference Number",38:"Authorization Identification Response",
+  39:"Response Code",40:"Service Restriction Code",41:"Card Acceptor Terminal ID",
+  42:"Card Acceptor ID Code",43:"Card Acceptor Name/Location",
+  44:"Additional Response Data",45:"Track 1 Data",46:"Amounts, Fees",
+  47:"Additional Data (National)",48:"Additional Data (Private)",
+  49:"Currency Code, Transaction",50:"Currency Code, Settlement",
+  51:"Currency Code, Cardholder Billing",52:"Personal ID Number (PIN) Data",
+  53:"Security Related Control Information",54:"Additional Amounts",
+  55:"ICC Data (EMV)",56:"Reserved ISO",57:"Reserved National",
+  58:"Reserved National",59:"Reserved National",60:"Reserved Private",
+  61:"Reserved Private",62:"Reserved Private",63:"Reserved Private",
+  64:"Message Authentication Code (MAC)",65:"Tertiary Bitmap",
+  66:"Settlement Code",67:"Extended Payment Code",
+  68:"Receiving Institution Country Code",69:"Settlement Institution Country Code",
+  70:"Network Management Information Code",71:"Message Number",
+  72:"Last Message Number",73:"Action Date",74:"Credits, Number",
+  75:"Credits, Reversal Number",76:"Debits, Number",77:"Debits, Reversal Number",
+  78:"Transfers, Number",79:"Transfers, Reversal Number",80:"Inquiries, Number",
+  81:"Authorizations, Number",82:"Credits, Processing Fee Amount",
+  83:"Credits, Transaction Fee Amount",84:"Debits, Processing Fee Amount",
+  85:"Debits, Transaction Fee Amount",86:"Credits, Amount",
+  87:"Credits, Reversal Amount",88:"Debits, Amount",89:"Debits, Reversal Amount",
+  90:"Original Data Elements",91:"File Update Code",92:"File Security Code",
+  93:"Response Indicator",94:"Service Indicator",95:"Replacement Amounts",
+  96:"Message Security Code",97:"Net Settlement Amount",98:"Payee",
+  99:"Settlement Institution ID Code",100:"Receiving Institution ID Code",
+  101:"File Name",102:"Account ID 1",103:"Account ID 2",
+  104:"Transaction Description",105:"Reserved ISO",106:"Reserved ISO",
+  107:"Reserved ISO",108:"Reserved ISO",109:"Reserved ISO",110:"Reserved ISO",
+  111:"Reserved ISO",112:"Reserved National",113:"Reserved National",
+  114:"Reserved National",115:"Reserved National",116:"Reserved National",
+  117:"Reserved National",118:"Reserved National",119:"Reserved National",
+  120:"Reserved Private",121:"Reserved Private",122:"Reserved Private",
+  123:"Reserved Private",124:"Reserved Private",125:"Reserved Private",
+  126:"Reserved Private",127:"Reserved Private",128:"Message Authentication Code"
+};
+
+// ═══════════════════════════════════════════════════════
+//  CORE LOGIC
+// ═══════════════════════════════════════════════════════
+
+function hexToBinary(hex) {
+  return hex.split('').map(c => parseInt(c,16).toString(2).padStart(4,'0')).join('');
+}
+
+function binaryToHex(bin) {
+  let result = '';
+  for (let i=0;i<bin.length;i+=4) result += parseInt(bin.slice(i,i+4),2).toString(16).toUpperCase();
+  return result;
+}
+
+function bitmapToDe(hexStr) {
+  hexStr = hexStr.toUpperCase().replace(/\s/g,'');
+  const len = hexStr.length;
+  if (!/^[0-9A-F]+$/.test(hexStr)) return {error:'❌ Invalid Hex — contains non-hex characters'};
+  if (![16,32,48].includes(len)) return {error:`❌ Invalid length: ${len} chars (must be 16, 32, or 48)`};
+
+  const binary = hexToBinary(hexStr);
+  const primary = binary.slice(0,64);
+  const secondary = len >= 32 ? binary.slice(64,128) : null;
+  const third     = len === 48 ? binary.slice(128,192) : null;
+
+  if (primary[0]==='1' && len===16) return {error:'❌ Secondary bitmap expected (Primary bit1=1) but not provided'};
+  if (primary[0]==='0' && len>=32) return {error:'❌ Secondary bitmap present but Primary bit1=0'};
+  if (secondary && secondary[0]==='1' && len===32) return {error:'❌ Third bitmap expected (Secondary bit1=1) but not provided'};
+  if (secondary && secondary[0]==='0' && len===48) return {error:'❌ Third bitmap present but Secondary bit1=0'};
+
+  const des = [];
+  for (let i=0;i<64;i++) if (primary[i]==='1') des.push(i+1);
+  const levels = ['Primary'];
+  if (primary[0]==='1') {
+    levels.push('Secondary');
+    for (let i=0;i<64;i++) if (secondary[i]==='1') des.push(i+65);
+    if (secondary[0]==='1') {
+      levels.push('Third');
+      for (let i=0;i<64;i++) if (third[i]==='1') des.push(i+129);
+    }
+  }
+  return {
+    levels, de_list: des, bitmap_hex: hexStr,
+    primary_hex: hexStr.slice(0,16),
+    secondary_hex: len>=32 ? hexStr.slice(16,32) : null,
+    third_hex: len===48 ? hexStr.slice(32,48) : null,
+    primary_bit1: primary[0],
+    secondary_bit1: secondary ? secondary[0] : 'N/A',
+    third_bit1: third ? third[0] : 'N/A'
+  };
+}
+
+function deToBitmap(deStr) {
+  let deList;
+  try {
+    deList = [...new Set(deStr.split(',').map(x=>parseInt(x.trim(),10)).filter(n=>!isNaN(n)))].sort((a,b)=>a-b);
+  } catch(e) {
+    return {error:'❌ Invalid format — use comma-separated integers'};
+  }
+  if (deList.length===0) return {error:'❌ No valid DE numbers found'};
+  for (const de of deList) if (de<1||de>192) return {error:`❌ DE ${de} out of range (1–192)`};
+
+  const maxDe = Math.max(...deList);
+  let size = 64;
+  if (maxDe>64) size=128;
+  if (maxDe>128) size=192;
+
+  const bits = Array(size).fill('0');
+  for (const de of deList) bits[de-1]='1';
+  if (size>=128) bits[0]='1';
+  if (size===192) bits[64]='1';
+
+  const binStr = bits.join('');
+  const hex = binaryToHex(binStr);
+  const levels = ['Primary'];
+  if (size>=128) levels.push('Secondary');
+  if (size===192) levels.push('Third');
+
+  return {
+    de_list: deList, size, hex_bitmap: hex,
+    primary_hex: hex.slice(0,16),
+    secondary_hex: size>=128 ? hex.slice(16,32) : null,
+    third_hex: size===192 ? hex.slice(32,48) : null,
+    levels
+  };
+}
+
+// ═══════════════════════════════════════════════════════
+//  STATE
+// ═══════════════════════════════════════════════════════
+
+let bmResult = null;
+let deResult = null;
+const historyLog = [];
+
+// ═══════════════════════════════════════════════════════
+//  HISTORY
+// ═══════════════════════════════════════════════════════
+
+function addHistory(type, input, output) {
+  const ts = new Date().toTimeString().slice(0,8);
+  historyLog.unshift({ts, type, input, output});
+  if (historyLog.length>50) historyLog.pop();
+}
+
+function renderHistory() {
+  const tbody = document.getElementById('hist-body');
+  if (historyLog.length===0) {
+    tbody.innerHTML='<tr><td colspan="4" class="empty">— no history yet —</td></tr>';
+    return;
+  }
+  tbody.innerHTML = historyLog.map(h=>`
+    <tr>
+      <td style="color:var(--muted)">${h.ts}</td>
+      <td><span class="hist-op ${h.type==='Bitmap→DE'?'bm':'de'}">${h.type}</span></td>
+      <td>${esc(h.input.slice(0,50))+(h.input.length>50?'…':'')}</td>
+      <td style="color:var(--muted)">${esc(h.output.slice(0,70))+(h.output.length>70?'…':'')}</td>
+    </tr>
+  `).join('');
+}
+
+function clearHistory() {
+  historyLog.length=0;
+  renderHistory();
+}
+
+function esc(s) {
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+// ═══════════════════════════════════════════════════════
+//  TAB 1 — Bitmap → DE
+// ═══════════════════════════════════════════════════════
+
+document.getElementById('bm-input').addEventListener('input', function() {
+  document.getElementById('bm-chars').textContent = this.value.trim().length + ' chars';
+});
+
+function loadExampleBm(val) {
+  document.getElementById('bm-input').value = val;
+  document.getElementById('bm-chars').textContent = val.length + ' chars';
+  doBitmap();
+}
+
+function clearBitmap() {
+  document.getElementById('bm-input').value='';
+  document.getElementById('bm-chars').textContent='0 chars';
+  document.getElementById('bm-output').textContent='— run analysis to see results —';
+  document.getElementById('bm-output').className='output-box';
+  document.getElementById('bm-de-strip').innerHTML='<span class="empty">— run analysis to see tags —</span>';
+  ['stat-levels','stat-count','stat-primary','stat-secondary','stat-third'].forEach(id=>document.getElementById(id).textContent='—');
+  bmResult=null;
+}
+
+document.getElementById('bm-input').addEventListener('keydown', e=>{ if(e.key==='Enter') doBitmap(); });
+
+function doBitmap() {
+  const val = document.getElementById('bm-input').value.trim();
+  if (!val) return;
+
+  const result = bitmapToDe(val);
+  if (result.error) {
+    bmResult=null;
+    const box = document.getElementById('bm-output');
+    box.textContent = result.error;
+    box.className='output-box error';
+    document.getElementById('bm-de-strip').innerHTML='';
+    addHistory('Bitmap→DE', val, result.error);
+    return;
+  }
+
+  bmResult = result;
+  document.getElementById('stat-levels').textContent = result.levels.length;
+  document.getElementById('stat-count').textContent = result.de_list.length;
+  document.getElementById('stat-primary').textContent = result.primary_hex;
+  document.getElementById('stat-secondary').textContent = result.secondary_hex || 'N/A';
+  document.getElementById('stat-third').textContent = result.third_hex || 'N/A';
+
+  // DE tags — left to right
+  const strip = document.getElementById('bm-de-strip');
+  strip.innerHTML = result.de_list.map(de => {
+    const desc = DE_DESC[de] || 'Reserved/Private';
+    return `<div class="de-tag">DE${String(de).padStart(3,'0')}<span class="tooltip">${esc(desc)}</span></div>`;
+  }).join('');
+
+  // Output text
+  let lines = [
+    `  Bitmap      : ${result.bitmap_hex}`,
+    `  Levels      : ${result.levels.join(', ')}`,
+    '',
+    `  Primary     : ${result.primary_hex}  [bit1=${result.primary_bit1}]`
+  ];
+  if (result.secondary_hex) lines.push(`  Secondary   : ${result.secondary_hex}  [bit1=${result.secondary_bit1}]`);
+  if (result.third_hex) lines.push(`  Third       : ${result.third_hex}  [bit1=${result.third_bit1}]`);
+  lines.push('', '  ── Data Elements ──────────────────────────────────────');
+  for (const de of result.de_list) {
+    const desc = DE_DESC[de] || 'Reserved / Private';
+    lines.push(`  DE ${String(de).padStart(3,' ')}  →  ${desc}`);
+  }
+
+  const box = document.getElementById('bm-output');
+  box.textContent = lines.join('\n');
+  box.className='output-box';
+  addHistory('Bitmap→DE', val, `${result.de_list.length} DEs: [${result.de_list.join(',')}]`);
+}
+
+function exportBmJson() {
+  if (!bmResult) return alert('Run an analysis first.');
+  download(JSON.stringify(bmResult, null, 2), 'bitmap_result.json', 'application/json');
+}
+
+function exportBmTxt() {
+  if (!bmResult) return alert('Run an analysis first.');
+  const r = bmResult;
+  const lines = [
+    'ISO 8583 Bitmap Analysis Report',
+    '='.repeat(50),
+    `Bitmap     : ${r.bitmap_hex}`,
+    `Levels     : ${r.levels.join(', ')}`,
+    `Primary    : ${r.primary_hex}`,
+    `Secondary  : ${r.secondary_hex||'N/A'}`,
+    `Third      : ${r.third_hex||'N/A'}`,
+    '',
+    `Total DEs  : ${r.de_list.length}`,
+    '',
+    'Data Elements:'
+  ];
+  for (const de of r.de_list) lines.push(`  DE ${String(de).padStart(3,' ')}  -  ${DE_DESC[de]||'Reserved / Private'}`);
+  download(lines.join('\n'), 'bitmap_result.txt', 'text/plain');
+}
+
+function sendBmToGrid() {
+  if (!bmResult) return alert('Run an analysis first.');
+  switchTab('grid');
+  document.getElementById('grid-input').value = bmResult.bitmap_hex;
+  doGrid();
+}
+
+// ═══════════════════════════════════════════════════════
+//  TAB 2 — DE → Bitmap
+// ═══════════════════════════════════════════════════════
+
+const COMMON_DES = [
+  [2,'PAN'],[3,'Proc Code'],[4,'Amount'],[7,'Trans DateTime'],
+  [11,'STAN'],[12,'Local Time'],[13,'Local Date'],[14,'Expiry'],
+  [18,'MCC'],[22,'POS Entry'],[25,'POS Cond'],[32,'Acq ID'],
+  [35,'Track2'],[37,'RRN'],[38,'Auth Code'],[39,'Resp Code'],
+  [41,'Terminal ID'],[42,'Merchant ID'],[43,'Merch Name'],[48,'Priv Data'],
+  [49,'Currency'],[52,'PIN'],[55,'EMV/ICC'],[64,'MAC'],
+];
+
+(function buildDeGrid() {
+  const grid = document.getElementById('de-grid');
+  grid.innerHTML = COMMON_DES.map(([de, label]) => `
+    <label class="de-check">
+      <input type="checkbox" value="${de}" onchange="updateDeFromToggles()">
+      <span><span class="de-num">DE${String(de).padStart(3,'0')}</span> ${label}</span>
+    </label>
+  `).join('');
+})();
+
+function updateDeFromToggles() {
+  const checked = [...document.querySelectorAll('#de-grid input:checked')].map(el=>el.value);
+  document.getElementById('de-input').value = checked.join(', ');
+  if (checked.length) doDe();
+}
+
+function clearDe() {
+  document.getElementById('de-input').value='';
+  document.querySelectorAll('#de-grid input').forEach(el=>el.checked=false);
+  document.getElementById('de-output').textContent='— generate a bitmap to see results —';
+  deResult=null;
+}
+
+document.getElementById('de-input').addEventListener('keydown', e=>{ if(e.key==='Enter') doDe(); });
+
+function doDe() {
+  const val = document.getElementById('de-input').value.trim();
+  if (!val) return;
+
+  const result = deToBitmap(val);
+  if (result.error) {
+    deResult=null;
+    document.getElementById('de-output').textContent = result.error;
+    addHistory('DE→Bitmap', val, result.error);
+    return;
+  }
+  deResult = result;
+
+  const binary = hexToBinary(result.hex_bitmap);
+  let lines = [
+    `  Data Elements : [${result.de_list.join(', ')}]`,
+    `  Levels        : ${result.levels.join(', ')}`,
+    '',
+    `  Primary       : ${result.primary_hex}`
+  ];
+  if (result.secondary_hex) lines.push(`  Secondary     : ${result.secondary_hex}`);
+  if (result.third_hex) lines.push(`  Third         : ${result.third_hex}`);
+  lines.push('', `  Full Bitmap   : ${result.hex_bitmap}`, '', '  ── Binary Breakdown ────────────────────────────────────');
+  ['Primary','Secondary','Third'].forEach((lname, idx) => {
+    if (idx*64 >= binary.length) return;
+    const chunk = binary.slice(idx*64, idx*64+64);
+    const fmt = chunk.match(/.{8}/g).join(' ');
+    lines.push(`  ${lname.padEnd(10)}: ${fmt}`);
+  });
+
+  document.getElementById('de-output').textContent = lines.join('\n');
+  addHistory('DE→Bitmap', val, result.hex_bitmap);
+}
+
+function exportDeJson() {
+  if (!deResult) return alert('Generate a bitmap first.');
+  download(JSON.stringify(deResult, null, 2), 'de_bitmap.json', 'application/json');
+}
+
+function copyDeBitmap() {
+  if (!deResult) return alert('Generate a bitmap first.');
+  navigator.clipboard.writeText(deResult.hex_bitmap).then(()=>{
+    alert(`Copied:\n${deResult.hex_bitmap}`);
+  });
+}
+
+function sendDeToGrid() {
+  if (!deResult) return alert('Generate a bitmap first.');
+  switchTab('grid');
+  document.getElementById('grid-input').value = deResult.hex_bitmap;
+  doGrid();
+}
+
+// ═══════════════════════════════════════════════════════
+//  TAB 3 — Bit Grid
+// ═══════════════════════════════════════════════════════
+
+document.getElementById('grid-input').addEventListener('keydown', e=>{ if(e.key==='Enter') doGrid(); });
+
+function clearGrid() {
+  document.getElementById('grid-input').value='';
+  document.getElementById('grid-output').innerHTML='<div class="empty">— enter a bitmap above and click Visualize —</div>';
+}
+
+function doGrid() {
+  const hex = document.getElementById('grid-input').value.trim().toUpperCase().replace(/\s/g,'');
+  if (!hex) return;
+  const binary = hexToBinary(hex);
+  if (!binary) return;
+
+  const container = document.getElementById('grid-output');
+  const levelNames = ['PRIMARY','SECONDARY','THIRD'];
+  const numLevels = binary.length/64;
+
+  let html='';
+  for (let lvl=0; lvl<numLevels; lvl++) {
+    const chunk = binary.slice(lvl*64, lvl*64+64);
+    const hexPart = hex.slice(lvl*16, lvl*16+16);
+    html += `<div class="grid-level">
+      <div class="grid-level-title">▌ ${levelNames[lvl]} BITMAP &nbsp;&nbsp; ${hexPart}</div>
+      <div class="bit-grid">`;
+    for (let i=0; i<64; i++) {
+      const de = lvl*64 + i + 1;
+      const on = chunk[i]==='1';
+      const desc = DE_DESC[de]||'Reserved/Private';
+      html += `<div class="bit-cell ${on?'on':'off'}">
+        <span class="bit-de">${de}</span>
+        <span class="bit-val">${on?'ON':'—'}</span>
+        <div class="tooltip">DE${de}: ${esc(desc)}</div>
+      </div>`;
+    }
+    html += `</div></div>`;
+  }
+  container.innerHTML = html;
+}
+
+// ═══════════════════════════════════════════════════════
+//  SHARED UTILITIES
+// ═══════════════════════════════════════════════════════
+
+function pasteClipboard(inputId, callback) {
+  navigator.clipboard.readText().then(text=>{
+    document.getElementById(inputId).value = text.trim();
+    document.getElementById('bm-chars').textContent = text.trim().length+' chars';
+    callback();
+  }).catch(()=>{
+    alert('Clipboard access denied — paste manually with Ctrl+V');
+  });
+}
+
+function download(content, filename, type) {
+  const blob = new Blob([content], {type});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href=url; a.download=filename; a.click();
+  URL.revokeObjectURL(url);
+}
+
+// ═══════════════════════════════════════════════════════
+//  TAB SWITCHING
+// ═══════════════════════════════════════════════════════
+
+function switchTab(tab) {
+  document.querySelectorAll('.tab').forEach(el=>el.classList.toggle('active', el.dataset.tab===tab));
+  document.querySelectorAll('.tab-panel').forEach(el=>el.classList.toggle('active', el.id==='panel-'+tab));
+  if (tab==='history') renderHistory();
+}
+
+document.querySelectorAll('.tab').forEach(el=>{
+  el.addEventListener('click', ()=>switchTab(el.dataset.tab));
+});
+</script>
+</body>
+</html>
